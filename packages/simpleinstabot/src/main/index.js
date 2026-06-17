@@ -86,13 +86,6 @@ async function initInstautoDb(usernameIn) {
   const unfollowedDbPath = getFilePath(username ? `${username}-unfollowed.json` : 'followed.json');
   const likedPhotosDbPath = getFilePath(username ? `${username}-liked-photos.json` : 'followed.json');
 
-  // Migrate any old paths if we have new version (with username) now:
-  if (username) {
-    await fs.move(getFilePath('followed.json'), followedDbPath).catch();
-    await fs.move(getFilePath('unfollowed.json'), unfollowedDbPath).catch();
-    await fs.move(getFilePath('liked-photos.json'), likedPhotosDbPath).catch();
-  }
-
   instautoDb = await JSONDB({
     followedDbPath,
     unfollowedDbPath,
