@@ -377,29 +377,50 @@ function Instauto(db: JSONDBInstance, page: Page, options: InstautoOptions): Ins
   }
 
   // See https://github.com/mifi/SimpleInstaBot/issues/140#issuecomment-1149105387
-  const gotoUrl = async (url: string) => page.goto(url, { waitUntil: ['load', 'domcontentloaded', 'networkidle0'] });
+  // Increase navigation timeout slightly and make it explicit to avoid
+  // unhandled TimeoutError bubbling out of navigation calls.
+  // Puppeteer's default navigation timeout is 30s which sometimes is too
+  // aggressive for slow connections or intermittent resource loading.
+  const gotoUrl = async (url: string) => page.goto(url, {
+    waitUntil: ['load', 'domcontentloaded', 'networkidle0'],
+    timeout: 60000,
+  });
 
   async function gotoWithRetry(url: string) {
     const maxAttempts = 3;
     for (let attempt = 0; ; attempt += 1) {
       logger.log(`Goto ${url}`);
-      const response = await gotoUrl(url);
-      if (!response) throw new Error('Navigation did not return a response');
-      const status = response.status();
-      logger.log('Page loaded');
-      await sleep(2000);
+      try {
+        const response = await gotoUrl(url);
+        if (!response) throw new Error('Navigation did not return a response');
+        const status = response.status();
+        logger.log('Page loaded');
+        await sleep(2000);
 
-      // https://www.reddit.com/r/Instagram/comments/kwrt0s/error_560/
-      // https://github.com/mifi/instauto/issues/60
-      if (![560, 429].includes(status)) return status;
+        // https://www.reddit.com/r/Instagram/comments/kwrt0s/error_560/
+        // https://github.com/mifi/instauto/issues/60
+        if (![560, 429].includes(status)) return status;
 
-      if (attempt > maxAttempts) {
-        throw new Error(`Navigate to user failed after ${maxAttempts} attempts, last status: ${status}`);
+        if (attempt > maxAttempts) {
+          throw new Error(`Navigate to user failed after ${maxAttempts} attempts, last status: ${status}`);
+        }
+
+        logger.info(`Got ${status} - Retrying request later...`);
+        if (status === 429) logger.warn('429 Too Many Requests could mean that Instagram suspects you\'re using a bot. You could try to use the Instagram Mobile app from the same IP for a few days first');
+        // For HTTP errors like 429/560 we back off for a longer period.
+        await sleep((attempt + 1) * 30 * 60 * 1000);
+      } catch (err) {
+        // Handle navigation errors such as timeouts. These are often transient
+        // and should be retried more quickly than HTTP rate-limit responses.
+        logger.warn('Navigation error', err);
+
+        if (attempt > maxAttempts) {
+          throw new Error(`Navigate to user failed after ${maxAttempts} attempts`);
+        }
+
+        // Shorter backoff for timeout/other navigation failures
+        await sleep((attempt + 1) * 5000);
       }
-
-      logger.info(`Got ${status} - Retrying request later...`);
-      if (status === 429) logger.warn('429 Too Many Requests could mean that Instagram suspects you\'re using a bot. You could try to use the Instagram Mobile app from the same IP for a few days first');
-      await sleep((attempt + 1) * 30 * 60 * 1000);
     }
   }
 
